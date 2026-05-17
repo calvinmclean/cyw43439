@@ -100,6 +100,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		RandSeed:          elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
 		HardwareAddress:   mac,
 		MTU:               1500, // 1500 for compatibility with most nodes.
+		PassivePeers:      min(255, int(cfg.MaxActiveTCPPorts)+int(cfg.MaxActiveUDPPorts)+1),
 	})
 	dev.RecvEthHandle(func(pkt []byte) error {
 		err := stack.s.IngressEthernet(pkt)
