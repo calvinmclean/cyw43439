@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"runtime"
-	"unsafe"
 
 	"github.com/soypat/seqs/eth"
 )
@@ -23,8 +22,8 @@ var (
 
 // ScanResult errors
 var (
-	errBufferUnaligned = errors.New("buffer not aligned to 4 bytes")
-	errIEEndExceedsBSS = errors.New("IE end exceeds bss length")
+	errIEEndExceedsBSS   = errors.New("IE end exceeds bss length")
+	errInvalidSSIDLength = errors.New("invalid scan result SSID length")
 )
 
 // Common async event errors.
@@ -184,10 +183,6 @@ func ParseAsyncEvent(order binary.ByteOrder, buf []byte) (ev AsyncEvent, err err
 	const ifaceOffset = 12 + 4 + 30
 	ev.Interface = buf[ifaceOffset]
 	if ev.EventType == CYW43_EV_ESCAN_RESULT && ev.Status == CYW43_STATUS_PARTIAL {
-		const sizeStruct = unsafe.Sizeof(ev)
-		if len(buf) < int(sizeStruct) {
-			return ev, io.ErrShortBuffer
-		}
 		ev.u, err = ParseScanResult(order, buf[48:])
 	}
 	return ev, err
@@ -195,33 +190,6 @@ func ParseAsyncEvent(order binary.ByteOrder, buf []byte) (ev AsyncEvent, err err
 
 func (ev *AsyncEvent) EventScanResult() *EventScanResult {
 	return &ev.u
-}
-
-type evscanresult struct {
-	Version      uint32   // 0:4
-	Length       uint32   // 4:8
-	BSSID        [6]byte  // 8:14
-	BeaconPeriod uint16   // 14:16
-	SSIDLength   uint8    // 16:17
-	Capability   uint16   // 17:19
-	SSID         [32]byte //
-	RatesetCount uint32
-	RatesetRates [16]uint8
-	ChanSpec     uint16
-	AtimWindow   uint16
-	DtimPeriod   uint8
-	RSSI         int16
-	PHYNoise     int8
-	NCap         uint8
-	NBSSCap      uint32
-	CtlCh        uint8
-	_            [1]uint32
-	Flags        uint8
-	_            [3]uint8
-	BasicMCS     [16]uint8
-	IEOffset     uint16
-	IELength     uint32
-	SNR          int16
 }
 
 // EventScanResult holds wifi scan results.
@@ -237,34 +205,82 @@ type EventScanResult struct {
 	_       [5]uint32
 	Channel uint16
 	_       uint16
-	// Wifi auth mode. See CYW43_AUTH_*.
+	// Wi-Fi security flags: bit 0 WEP, bit 1 WPA, and bit 2 WPA2.
 	AuthMode uint8
 	// Signal strength.
 	RSSI int16
 }
 
+// SSIDString returns the network name as a string.
+func (sr EventScanResult) SSIDString() string {
+	length := min(int(sr.SSIDLength), len(sr.SSID))
+	return string(sr.SSID[:length])
+}
+
 // reference: cyw43_ll_wifi_parse_scan_result
 func ParseScanResult(order binary.ByteOrder, buf []byte) (sr EventScanResult, err error) {
-	type scanresult struct {
-		buflen   uint32
-		version  uint32
-		syncid   uint16
-		bssCount uint16
-		bss      evscanresult
-	}
-	if len(buf) > int(unsafe.Sizeof(scanresult{})) {
+	// The event header is network byte order, but the escan payload is in the
+	// device's native (little-endian) layout. Parse fields individually because
+	// the event payload is only guaranteed to be aligned to two bytes on RP2040.
+	_ = order
+	const (
+		bssOffset        = 12
+		bssLengthOffset  = bssOffset + 4
+		bssidOffset      = bssOffset + 8
+		capabilityOffset = bssOffset + 16
+		ssidLengthOffset = bssOffset + 18
+		ssidOffset       = bssOffset + 19
+		channelOffset    = bssOffset + 72
+		rssiOffset       = bssOffset + 78
+		ieOffsetOffset   = bssOffset + 116
+		ieLengthOffset   = bssOffset + 120
+		fixedLength      = ieLengthOffset + 4
+	)
+	if len(buf) < fixedLength {
 		return sr, io.ErrShortBuffer
 	}
-	ptr := unsafe.Pointer(&buf[0])
-	if uintptr(ptr)%4 != 0 {
-		return sr, errBufferUnaligned
+
+	ssidLen := int(buf[ssidLengthOffset])
+	if ssidLen > len(sr.SSID) {
+		return sr, errInvalidSSIDLength
 	}
-	scan := (*scanresult)(ptr)
-	if uint32(scan.bss.IEOffset)+scan.bss.IELength > scan.bss.Length {
-		return sr, errIEEndExceedsBSS
+	sr.SSIDLength = uint8(ssidLen)
+	copy(sr.SSID[:], buf[ssidOffset:ssidOffset+ssidLen])
+	copy(sr.BSSID[:], buf[bssidOffset:bssidOffset+len(sr.BSSID)])
+	sr.Channel = binary.LittleEndian.Uint16(buf[channelOffset:]) & 0xff
+	sr.RSSI = int16(binary.LittleEndian.Uint16(buf[rssiOffset:]))
+
+	bssLength := binary.LittleEndian.Uint32(buf[bssLengthOffset:])
+	ieOffset := binary.LittleEndian.Uint16(buf[ieOffsetOffset:])
+	ieLength := binary.LittleEndian.Uint32(buf[ieLengthOffset:])
+	if uint64(ieOffset)+uint64(ieLength) > uint64(bssLength) ||
+		uint64(bssOffset)+uint64(ieOffset)+uint64(ieLength) > uint64(len(buf)) {
+		return EventScanResult{}, errIEEndExceedsBSS
 	}
-	// TODO(soypat): lots of stuff missing here.
-	return *(*EventScanResult)(unsafe.Pointer(&scan.bss)), nil
+
+	// Match the reference driver's security flags: bit 0 WEP, bit 1 WPA,
+	// bit 2 WPA2. WPA3 is not distinguishable without deeper RSN parsing.
+	if binary.LittleEndian.Uint16(buf[capabilityOffset:])&DOT11_CAP_PRIVACY != 0 {
+		sr.AuthMode |= 1
+	}
+	ie := buf[bssOffset+int(ieOffset) : bssOffset+int(ieOffset)+int(ieLength)]
+	for len(ie) >= 2 {
+		length := int(ie[1])
+		if length > len(ie)-2 {
+			break
+		}
+		data := ie[2 : 2+length]
+		switch {
+		case ie[0] == DOT11_IE_ID_RSN:
+			sr.AuthMode |= 4
+		case ie[0] == DOT11_IE_ID_VENDOR_SPECIFIC && len(data) >= len(WPA_OUI_TYPE1) &&
+			data[0] == WPA_OUI_TYPE1[0] && data[1] == WPA_OUI_TYPE1[1] &&
+			data[2] == WPA_OUI_TYPE1[2] && data[3] == WPA_OUI_TYPE1[3]:
+			sr.AuthMode |= 2
+		}
+		ie = ie[2+length:]
+	}
+	return sr, nil
 }
 
 // ScanOptions are wifi scan options.

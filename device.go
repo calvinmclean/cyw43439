@@ -96,6 +96,9 @@ type Device struct {
 	authOK          bool // AUTH event succeeded. ref: runner.rs:90
 	joinOK          bool // JOIN event succeeded. ref: runner.rs:88
 	keyExchangeOK   bool // PSK_SUP key exchange succeeded. ref: runner.rs:89
+	scanCallback    func(ScanResult)
+	scanDone        bool
+	scanErr         error
 }
 
 type Config struct {

@@ -539,6 +539,9 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	// Link is UP when: joinOK && (!secureNetwork || keyExchangeOK)  ref: runner.rs:826
 	status := whd.EStatus(aePacket.Message.Status)
 	msg := &aePacket.Message
+	if ev == whd.EvESCAN_RESULT {
+		return d.handleScanEvent(status, bdcPacket[72:])
+	}
 	updateLinkStatus := false
 	switch {
 	// SET_SSID is used by wait_for_join (control.rs:413-419) to detect join completion/failure.
