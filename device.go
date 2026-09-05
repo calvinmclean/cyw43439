@@ -96,6 +96,14 @@ type Device struct {
 	authOK          bool // AUTH event succeeded. ref: runner.rs:90
 	joinOK          bool // JOIN event succeeded. ref: runner.rs:88
 	keyExchangeOK   bool // PSK_SUP key exchange succeeded. ref: runner.rs:89
+	apBSSUp         bool // Local AP BSS is active and can transmit data.
+}
+
+// canTransmit reports whether either Wi-Fi role has an active data link.
+// A station becomes ready after association; an access point becomes ready
+// synchronously after its BSS is brought up.
+func (d *Device) canTransmit() bool {
+	return d.state == linkStateUp || d.apBSSUp
 }
 
 type Config struct {

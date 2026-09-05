@@ -365,6 +365,9 @@ func (d *Device) Join(ssid string, options JoinOptions) error {
 	if err != nil {
 		return err
 	}
+	// Joining switches the device back to the station role. Do not let a
+	// previously started AP BSS keep the data path marked ready.
+	d.apBSSUp = false
 	if options.Auth == joinAuthUndefined || options.Auth > JoinAuthWPA2WPA3 {
 		options.Auth = JoinAuthOpen
 		if options.Passphrase != "" {
@@ -478,6 +481,8 @@ func (d *Device) StartAP(ssid, pass string, channel uint8) error {
 	if err != nil {
 		return err
 	}
+	// Clear a previous AP-ready result while reconfiguring the BSS.
+	d.apBSSUp = false
 
 	security := whd.CYW43_AUTH_OPEN
 	if pass != "" {
@@ -486,6 +491,15 @@ func (d *Device) StartAP(ssid, pass string, channel uint8) error {
 		}
 		security = whd.CYW43_AUTH_WPA2_AES_PSK
 	}
+
+	// Keep AP client lifecycle events so PollOne reports stations joining and
+	// leaving the network. The firmware event mask is configured during Init;
+	// this mask controls which received events are processed locally.
+	d.eventmask.Enable(whd.EvAUTH_IND)
+	d.eventmask.Enable(whd.EvDEAUTH_IND)
+	d.eventmask.Enable(whd.EvASSOC_IND)
+	d.eventmask.Enable(whd.EvREASSOC_IND)
+	d.eventmask.Enable(whd.EvDISASSOC_IND)
 
 	// Temporarily set wifi down
 	if err := d.doIoctlSet(whd.WLC_DOWN, whd.IF_STA, nil); err != nil {
@@ -545,6 +559,10 @@ func (d *Device) StartAP(ssid, pass string, channel uint8) error {
 		return err
 	}
 
+	// An active AP can transmit regardless of whether any stations are
+	// associated. Keep this separate from station link state, which is driven by
+	// JOIN/AUTH/PSK_SUP events for a client connection.
+	d.apBSSUp = true
 	return nil
 }
 

@@ -103,7 +103,7 @@ const (
 
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
-	if !d.IsLinkUp() {
+	if !d.canTransmit() {
 		return errLinkDown
 	}
 	// reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L247
@@ -612,6 +612,7 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	if d.logenabled(slog.LevelInfo) {
 		d.info("rxEvent",
 			slog.String("event", ev.String()),
+			slog.String("addr", ethernet.String(msg.Addr)),
 			slog.Uint64("status", uint64(aePacket.Message.Status)),
 			slog.Uint64("reason", uint64(aePacket.Message.Reason)),
 			slog.Uint64("flags", uint64(aePacket.Message.Flags)),
