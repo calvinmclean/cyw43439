@@ -18,15 +18,14 @@ func main() {
 	}
 
 	println("scanning Wi-Fi networks...")
-	count := 0
-	err := dev.Scan(cyw43439.ScanOptions{}, func(result cyw43439.ScanResult) {
-		count++
-		println(count, result.SSIDString(), "channel", result.Channel, "RSSI", result.RSSI, "auth", result.AuthMode)
-	})
+	accessPoints, err := dev.Scan()
 	if err != nil {
 		panic("Wi-Fi scan: " + err.Error())
 	}
-	println("scan complete:", count, "networks")
+	for i, ap := range accessPoints {
+		println(i+1, ap.SSID, "RSSI", ap.RSSI)
+	}
+	println("scan complete:", len(accessPoints), "networks")
 
 	for {
 		time.Sleep(time.Hour)

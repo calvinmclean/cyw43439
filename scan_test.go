@@ -4,16 +4,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/soypat/cyw43439/whd"
 )
 
-func TestPutScanOptionsDefaults(t *testing.T) {
+func TestPutScanRequest(t *testing.T) {
 	var got [76]byte
-	if err := putScanOptions(got[:], ScanOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	putScanRequest(&got)
 	if binary.LittleEndian.Uint32(got[0:]) != 1 || binary.LittleEndian.Uint16(got[4:]) != 1 || binary.LittleEndian.Uint16(got[6:]) != 1 {
 		t.Fatal("invalid escan header")
 	}
@@ -27,40 +24,6 @@ func TestPutScanOptionsDefaults(t *testing.T) {
 		if binary.LittleEndian.Uint32(got[offset:]) != ^uint32(0) {
 			t.Fatalf("offset %d does not use firmware default", offset)
 		}
-	}
-}
-
-func TestPutScanOptionsFiltersAndTiming(t *testing.T) {
-	var got [76]byte
-	opts := ScanOptions{
-		SSID:      "network",
-		BSSID:     [6]byte{1, 2, 3, 4, 5, 6},
-		Passive:   true,
-		Probes:    3,
-		DwellTime: 40 * time.Millisecond,
-		HomeTime:  25 * time.Millisecond,
-	}
-	if err := putScanOptions(got[:], opts); err != nil {
-		t.Fatal(err)
-	}
-	if binary.LittleEndian.Uint32(got[8:]) != 7 || string(got[12:19]) != "network" {
-		t.Fatal("SSID filter not encoded")
-	}
-	if got[51] != 1 || binary.LittleEndian.Uint32(got[52:]) != 3 {
-		t.Fatal("passive scan settings not encoded")
-	}
-	if binary.LittleEndian.Uint32(got[56:]) != ^uint32(0) || binary.LittleEndian.Uint32(got[60:]) != 40 || binary.LittleEndian.Uint32(got[64:]) != 25 {
-		t.Fatal("scan timings not encoded")
-	}
-}
-
-func TestPutScanOptionsValidation(t *testing.T) {
-	var dst [76]byte
-	if err := putScanOptions(dst[:], ScanOptions{SSID: "123456789012345678901234567890123"}); err == nil {
-		t.Fatal("expected long SSID error")
-	}
-	if err := putScanOptions(dst[:], ScanOptions{DwellTime: -time.Millisecond}); err == nil {
-		t.Fatal("expected negative duration error")
 	}
 }
 

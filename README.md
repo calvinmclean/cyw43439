@@ -23,17 +23,14 @@ tinygo flash -target=pico -stack-size=8kb -scheduler=tasks -monitor  ./examples/
 
 ### Scanning for Wi-Fi networks
 
-After initializing a Wi-Fi `Device`, call `Scan` to receive each visible access
-point without allocating a result slice:
+After initializing a Wi-Fi `Device`, call `Scan` to list visible access points:
 
 ```go
-err := dev.Scan(cyw43439.ScanOptions{}, func(result cyw43439.ScanResult) {
-	println(result.SSIDString(), "channel", result.Channel, "RSSI", result.RSSI)
-})
+accessPoints, err := dev.Scan()
+for _, ap := range accessPoints {
+	println(ap.SSID, "RSSI", ap.RSSI)
+}
 ```
-
-`ScanOptions` can restrict the SSID or BSSID and configure active/passive scan
-timing. The callback must not call other methods on the same device.
 
 ### Debugging and heap allocations
 The examples use the [`soypat/seqs` networking stack library](https://github.com/soypat/seqs/). One can enable heap debugging by using the `debugheaplog` build tag:
